@@ -6,7 +6,7 @@ from io import BytesIO
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Multi-Utility Bill Extractor Pro",
+    page_title="Strict Schema Bill Extractor",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -39,19 +39,16 @@ st.markdown("""
 # --- Sidebar Instructions ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/electricity.png", width=70)
-    st.title("Multi-Utility Parser")
+    st.title("Schema Extractor")
     st.markdown("---")
-    st.markdown("### 📌 Supported Utilities:")
-    st.markdown("- **BEST** (Mumbai)")
-    st.markdown("- **Adani Electricity**")
-    st.markdown("- **Tata Power**")
-    st.markdown("- **MSEDCL / Mahavitaran**")
-    st.markdown("---")
+    st.markdown("### 📌 Specifications:")
     st.markdown("- **1 PDF Bill** = **1 Row** (all pages merged).")
+    st.markdown("- Strict type separation (Numbers vs Text).")
+    st.markdown("- Multi-file batch support enabled.")
 
 # --- Main App Header ---
-st.title("⚡ Multi-Utility Electricity Bill Extractor")
-st.markdown("Upload bills from **BEST, Adani, Tata, MSEDCL**, or other providers to generate a clean master Excel sheet.")
+st.title("⚡ Utility Bill Schema Extractor")
+st.markdown("Extract bills into precise numerical and text columns with **one row per bill**.")
 st.markdown("---")
 
 # --- Extraction Logic ---
@@ -70,6 +67,7 @@ def parse_single_bill(uploaded_file):
             match = re.search(regex, text, re.IGNORECASE)
             if match:
                 val = match.group(1).strip()
+                # Clean up commas in numbers if desired, keeping standard formatting
                 if val:
                     return val
         return default
@@ -83,116 +81,54 @@ def parse_single_bill(uploaded_file):
                     return val
         return default
 
-    # Universal robust mappings with multiple fallback patterns for different providers
+    # Mapping fields according to your exact schema and data types
     data = {
         "Source File": uploaded_file.name,
         
         # Numbers
-        "CA No": find_num([
-            r'C\.?A\.?\s*No\.?\s*[:\-]?\s*([0-9]{6,12})',
-            r'(?:Consumer\s*No\.?|Account\s*No\.?|Cons\.?\s*No\.?)\s*[:\-]?\s*([0-9]{6,15})',
-            r'\b(?:CA)\b[^0-9]*([0-9]{6,12})'
-        ], full_text),
-        
-        "Bill No": find_num([
-            r'(?:Bill\s*No\.?|Invoice\s*No\.?|Bill\s*Number)\s*[:\-]?\s*([0-9A-Za-z\-]{5,20})'
-        ], full_text),
-        
-        "Meter no": find_num([
-            r'(?:Meter\s*No\.?|Meter\s*Number|Meter\s*ID)\s*[:\-]?\s*([0-9A-Za-z]{5,15})'
-        ], full_text),
+        "CA No": find_num([r'(?:CA\s*No\.?|Consumer\s*No\.?|Account\s*No\.?|Cons\.?\s*No\.?)\s*[:\-]?\s*([0-9]{8,15})', r'\b(?:CA)\b[^0-9]*([0-9]{9,12})'], full_text),
+        "Bill No": find_num([r'(?:Bill\s*No\.?|Invoice\s*No\.?|Bill\s*Number)\s*[:\-]?\s*([0-9]{6,15})'], full_text),
+        "Meter no": find_num([r'(?:Meter\s*No\.?|Meter\s*Number|Meter\s*ID)\s*[:\-]?\s*([0-9]{5,12})'], full_text),
         
         # Text
-        "Address": find_text([
-            r'Billing\s*Address\s*:\s*([^\n\r]+(?:[\r\n]+[^\n\r]+){0,2})',
-            r'(?:Service\s*Address|Cons\.?\s*Name\s*&?\s*Address|Address)\s*[:\-]?\s*([^\n\r]+)'
-        ], full_text),
+        "Address": find_text([r'(?:Service\s*Address|Cons\.?\s*Name\s*&?\s*Address|Address)\s*[:\-]?\s*([^\n\r]+)'], full_text),
         
         # Numbers
-        "Sanction Load": find_num([
-            r'Sanctioned\s*Load\s*[:\-]?\s*([0-9\.]+)',
-            r'(?:Sanction(?:ed)?\s*Load)\s*[:\-]?\s*([0-9\.]+)',
-            r'([0-9\.]+)\s*(?:KW|KVA|kW|kVA)\s*Sanction'
-        ], full_text),
-        
+        "Sanction Load": find_num([r'(?:Sanction(?:ed)?\s*Load)\s*[:\-]?\s*([0-9\.]+)', r'([0-9\.]+)\s*(?:KW|KVA|kW|kVA)\s*Sanction'], full_text),
         "Connected load": find_num([r'(?:Connected\s*Load)\s*[:\-]?\s*([0-9\.]+)'], full_text),
         "Security Deposit": find_num([r'(?:Security\s*Deposit|SD)\s*[:\-]?\s*([\d\.,]+)'], full_text),
         "RMD": find_num([r'(?:RMD|Registered\s*Maximum\s*Demand)\s*[:\-]?\s*([0-9\.]+)'], full_text),
         "BMD": find_num([r'(?:BMD|Billing\s*Maximum\s*Demand)\s*[:\-]?\s*([0-9\.]+)'], full_text),
         "Power Factor": find_num([r'(?:Power\s*Factor|P\.?F\.?)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        
-        "Contract Demand": find_num([
-            r'Contract\s*Demand\s*in\s*KVA\s*[:\-]?\s*([0-9\.]+)',
-            r'(?:Contract\s*Demand|C\.?D\.?)\s*[:\-]?\s*([0-9\.]+)'
-        ], full_text),
-        
-        "Billing Demand": find_num([
-            r'Billing\s*Demand\s*in[^\n\r]*[\r\n]+\s*([0-9\.]+)',
-            r'(?:Billing\s*Demand)\s*[:\-]?\s*([0-9\.]+)'
-        ], full_text),
+        "Contract Demand": find_num([r'(?:Contract\s*Demand|C\.?D\.?)\s*[:\-]?\s*([0-9\.]+)'], full_text),
+        "Billing Demand": find_num([r'(?:Billing\s*Demand)\s*[:\-]?\s*([0-9\.]+)'], full_text),
         
         # Text
-        "Tariff category": find_text([
-            r'Category\s*[:\-]?\s*([A-Za-z\s]+)',
-            r'(?:Tariff\s*Category|Consumer\s*Category)\s*[:\-]?\s*([A-Za-z\s]+)'
-        ], full_text),
-        
-        "Tariff": find_text([
-            r'(?<!Category\s)Tariff\s*[:\-]?\s*([A-Za-z0-9\-\/\s]+)'
-        ], full_text),
+        "Tariff category": find_text([r'(?:Tariff\s*Category|Category)\s*[:\-]?\s*([A-Za-z0-9\-\/\s]+)'], full_text),
+        "Tariff": find_text([r'(?<!Category\s)(?:Tariff)\s*[:\-]?\s*([A-Za-z0-9\-\/\s]+)'], full_text),
         
         # Numbers
-        "Units Consumed/Billed Unit": find_num([
-            r'kWh\s*[\r\n]+\s*[0-9\.]+\s*[0-9\.]+\s*[0-9\.]+\s*[0-9\.]+\s*([0-9\.]+)',
-            r'(?:Units?\s*Consumed|Billed\s*Units?|Consumption|Total\s*Units?)\s*[:\-]?\s*([0-9\.]+)'
-        ], full_text),
+        "Units Consumed/Billed Unit": find_num([r'(?:Units?\s*Consumed|Billed\s*Units?|Consumption|Total\s*Units?)\s*[:\-]?\s*([0-9\.]+)'], full_text),
         
-        # Text/Numbers
-        "Month": find_text([
-            r'Electricity\s*Bill\s*for\s*Month\s*of\s*([A-Za-z]+)',
-            r'(?:Month|Billing\s*Month)\s*[:\-]?\s*([A-Za-z]{3,9})'
-        ], full_text),
+        # Text
+        "Month": find_text([r'(?:Month|Billing\s*Month)\s*[:\-]?\s*([A-Za-z]{3,9})'], full_text),
         
-        "Year": find_num([
-            r'Electricity\s*Bill\s*for\s*Month\s*of\s*[A-Za-z]+\s*(\d{4})',
-            r'(?:Year|Billing\s*Year)\s*[:\-]?\s*(\d{4})'
-        ], full_text),
+        # Numbers
+        "Year": find_num([r'(?:Year|Billing\s*Year)\s*[:\-]?\s*(\d{4})'], full_text),
+        "Current month bill Amount Rs": find_num([r'(?:Current\s*Bill\s*Amount|Net\s*Amount|Total\s*Bill\s*Amount|Amount\s*Payable)\s*[:\-]?\s*([\d\.,]+)'], full_text),
+        "Gov Electricity Duty": find_num([r'(?:Electricity\s*Duty|Govt\.?\s*Duty|Ed\s*Duty)\s*[:\-]?\s*([\d\.,]+)'], full_text),
+        "Digital payment discount / (DPC)": find_num([r'(?:Digital\s*Payment\s*Discount|Online\s*Discount|DPC|Delayed\s*Payment\s*Charges)\s*[:\-]?\s*([\d\.,]+)'], full_text),
+        "DELAYED PAYMENT CHARGES": find_num([r'(?:Delayed\s*Payment\s*Charges|DPC)\s*[:\-]?\s*([\d\.,]+)'], full_text),
+        "Prompt payment discount": find_num([r'(?:Prompt\s*Payment\s*Discount|PPD)\s*[:\-]?\s*([\d\.,]+)'], full_text),
+        "TOD Charges": find_num([r'(?:TOD\s*Charges?|Time\s*of\s*Day\s*Charges?)\s*[:\-]?\s*([\d\.,]+)'], full_text),
         
-        "Current month bill Amount Rs": find_num([
-            r'Total\s*Current\s*Month\s*charges\s*\(?A\+B\)?\s*[:\-]?\s*([\d\.,]+)',
-            r'(?:Current\s*Bill\s*Amount|Net\s*Amount|Total\s*Bill\s*Amount|Amount\s*Payable)\s*[:\-]?\s*([\d\.,]+)'
-        ], full_text),
-        
-        "Gov Electricity Duty": find_num([
-            r'(?:Electricity\s*Duty|Govt\.?\s*Duty|Ed\s*Duty)\s*[:\-]?\s*([\d\.,]+)'
-        ], full_text),
-        
-        "Digital payment discount / (DPC)": find_num([
-            r'Digital\s*Payment\s*Disc\.?\/ebill\s*disc[^\n\r]*?([-\d\.]+)',
-            r'(?:Digital\s*Payment\s*Discount|Online\s*Discount|DPC)\s*[:\-]?\s*([-\d\.,]+)'
-        ], full_text),
-        
-        "DELAYED PAYMENT CHARGES": find_num([
-            r'Delayed\s*Payment\s*Charges[^\n\r]*?([-\d\.]+)',
-            r'(?:Delayed\s*Payment\s*Charges|DPC)\s*[:\-]?\s*([\d\.,]+)'
-        ], full_text),
-        
-        "Prompt payment discount": find_num([
-            r'(?:Prompt\s*Payment\s*Discount|PPD)\s*[:\-]?\s*([\d\.,]+)'
-        ], full_text),
-        
-        "TOD Charges": find_num([
-            r'TOD\s*Charges\s*[:\-]?\s*([-\d\.,]+)',
-            r'(?:TOD\s*Charges?|Time\s*of\s*Day\s*Charges?)\s*[:\-]?\s*([-\d\.,]+)'
-        ], full_text),
-        
-        # Text (Supply Co. Auto-detection)
+        # Text (Supply Co.)
         "Supply Co.(BEST / Adani / Tata / MSEDCL)": (
             "BEST" if "BEST" in full_text else
             "Adani" if "ADANI" in full_text else
             "Tata" if "TATA" in full_text else
             "MSEDCL" if "MSEDCL" in full_text or "MAHAVITARAN" in full_text else
-            "Other Utility"
+            "Unknown"
         )
     }
 
@@ -227,7 +163,7 @@ if uploaded_files:
         st.subheader("📊 Structured Bill Summary (1 Row per Bill)")
         st.dataframe(df, use_container_width=True)
 
-        # Excel Export Setup
+        # Excel Export
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Bill Summary')
@@ -236,12 +172,12 @@ if uploaded_files:
         st.markdown("---")
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.markdown("Your unified master Excel file is ready for download.")
+            st.markdown("Your structured master Excel sheet is ready.")
         with col2:
             st.download_button(
                 label="📥 Download Master Excel File",
                 data=excel_data,
-                file_name="electricity_bills_master.xlsx",
+                file_name="electricity_bills_structured.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
@@ -249,4 +185,4 @@ if uploaded_files:
         with st.expander("🔍 View Raw Text of Processed Bills (For Layout Verification)"):
             for fname, text in raw_texts.items():
                 st.markdown(f"**File: {fname}**")
-                st.text(text[:2500] + "\n... [truncated]")
+                st.text(text[:2000] + "\n... [truncated]")
