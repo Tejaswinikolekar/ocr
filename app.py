@@ -6,13 +6,13 @@ from io import BytesIO
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Multi-Page Bill Data Extractor",
-    page_icon="📑",
+    page_title="Utility Bill Extractor",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- Modern Indigo/Slate Custom UI Styling ---
+# --- Modern UI Styling ---
 st.markdown("""
     <style>
     .main {
@@ -33,57 +33,46 @@ st.markdown("""
         background-color: #4f46e5;
         box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
     }
-    .metric-card {
-        background-color: #1e293b;
-        padding: 1.2rem;
-        border-radius: 10px;
-        border: 1px solid #334155;
-        text-align: center;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 # --- Sidebar ---
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/document--v1.png", width=70)
-    st.title("Extractor Studio")
+    st.image("https://img.icons8.com/color/96/electricity.png", width=70)
+    st.title("Bill Extractor Pro")
     st.markdown("---")
-    st.markdown("### 🔍 Target Fields Covered:")
-    st.markdown("""
-    * **Identifiers:** CA No, Bill No, Meter No, Address
-    * **Loads & Demand:** Sanction/Connected Load, RMD, BMD, Contract/Billing Demand
-    * **Tariffs & Units:** Tariff Category, Tariff, Units Consumed, Month, Year
-    * **Financials:** Bill Amount, Duty, Discounts, DPC, TOD Charges, Supply Co.
-    """)
-    st.markdown("---")
-    st.info("💡 **Pro Tip:** Each page of the PDF will be processed as an individual record row.")
+    st.markdown("### 🛠️ Troubleshooting Tip:")
+    st.markdown("If a field is missed, check the **Raw Text View** expander below the table to see how your bill structures its text labels.")
 
 # --- Main App Header ---
-st.title("📑 Comprehensive PDF Field Extractor")
-st.markdown("Extract all utility and tariff fields across **every page** of your document into a unified Excel database.")
+st.title("⚡ Smart Electricity Bill Extractor")
+st.markdown("Extract precise utility fields from your multi-page PDF bills into clean Excel sheets.")
 st.markdown("---")
 
-# --- Function to Extract Fields from a Single Page Text ---
+# --- Precision Extraction Logic ---
 def extract_fields_from_text(page_text, page_number):
     def find_pattern(regex, text, default=""):
         match = re.search(regex, text, re.IGNORECASE)
         return match.group(1).strip() if match else default
 
-    # Map all target fields using smart regular expressions
     data = {
         "Page No": page_number,
-        "CA No": find_pattern(r'(?:CA\s*No\.?|Consumer\s*No\.?|Account\s*No\.?)\s*[:\-]?\s*([A-Za-z0-9]+)', page_text),
-        "Bill No": find_pattern(r'(?:Bill\s*No\.?|Invoice\s*No\.?)\s*[:\-]?\s*([A-Za-z0-9]+)', page_text),
+        # Look for 9 to 12 digit consumer/CA numbers typically found in utility bills
+        "CA No": find_pattern(r'(?:CA\s*No\.?|Consumer\s*No\.?|Account\s*No\.?|Cons\s*No\.?)\s*[:\-]?\s*([0-9]{8,15})', page_text),
+        "Bill No": find_pattern(r'(?:Bill\s*No\.?|Invoice\s*No\.?)\s*[:\-]?\s*([A-Za-z0-9\-]{5,20})', page_text),
         "Meter no": find_pattern(r'(?:Meter\s*No\.?|Meter\s*Number)\s*[:\-]?\s*([A-Za-z0-9]+)', page_text),
-        "Address": find_pattern(r'(?:Address|Location)\s*[:\-]?\s*([^\n]+)', page_text),
-        "Sanction Load": find_pattern(r'(?:Sanction(?:ed)?\s*Load)\s*[:\-]?\s*([\d\.\s\w]+)', page_text),
-        "Connected load": find_pattern(r'(?:Connected\s*Load)\s*[:\-]?\s*([\d\.\s\w]+)', page_text),
-        "Security Deposit": find_pattern(r'(?:Security\s*Deposit)\s*[:\-]?\s*([\d\.,]+)', page_text),
+        "Address": find_pattern(r'(?:Address|Cons\.?\s*Name\s*&?\s*Address)\s*[:\-]?\s*([^\n\r]+)', page_text),
+        
+        # Look specifically for loads followed by KW, KVA, or HP
+        "Sanction Load": find_pattern(r'(?:Sanction(?:ed)?\s*Load)\s*[:\-]?\s*([\d\.]+\s*(?:KW|KVA|HP))', page_text),
+        "Connected load": find_pattern(r'(?:Connected\s*Load)\s*[:\-]?\s*([\d\.]+\s*(?:KW|KVA|HP))', page_text),
+        
+        "Security Deposit": find_pattern(r'(?:Security\s*Deposit|SD)\s*[:\-]?\s*([\d\.,]+)', page_text),
         "RMD": find_pattern(r'(?:RMD)\s*[:\-]?\s*([\d\.]+)', page_text),
         "BMD": find_pattern(r'(?:BMD)\s*[:\-]?\s*([\d\.]+)', page_text),
         "Power Factor": find_pattern(r'(?:Power\s*Factor|P\.?F\.?)\s*[:\-]?\s*([\d\.]+)', page_text),
-        "Contract Demand": find_pattern(r'(?:Contract\s*Demand|C\.?D\.?)\s*[:\-]?\s*([\d\.\s\w]+)', page_text),
-        "Billing Demand": find_pattern(r'(?:Billing\s*Demand)\s*[:\-]?\s*([\d\.\s\w]+)', page_text),
+        "Contract Demand": find_pattern(r'(?:Contract\s*Demand|C\.?D\.?)\s*[:\-]?\s*([\d\.]+\s*(?:KW|KVA))', page_text),
+        "Billing Demand": find_pattern(r'(?:Billing\s*Demand)\s*[:\-]?\s*([\d\.]+\s*(?:KW|KVA))', page_text),
         "Tariff category": find_pattern(r'(?:Tariff\s*Category|Category)\s*[:\-]?\s*([A-Za-z0-9\-\/\s]+)', page_text),
         "Tariff": find_pattern(r'(?<!Category\s)(?:Tariff)\s*[:\-]?\s*([A-Za-z0-9\-\/\s]+)', page_text),
         "Units Consumed/Billed Unit": find_pattern(r'(?:Units?\s*Consumed|Billed\s*Units?|Consumption|Units)\s*[:\-]?\s*([\d\.]+)', page_text),
@@ -111,61 +100,58 @@ def extract_fields_from_text(page_text, page_number):
 
     return data
 
-# --- File Uploader Widget ---
-uploaded_file = st.file_uploader("Upload your multi-page PDF document", type="pdf")
+# --- File Uploader ---
+uploaded_file = st.file_uploader("Upload your electricity bill PDF", type="pdf")
 
 if uploaded_file is not None:
-    st.success(f"Successfully loaded: **{uploaded_file.name}**")
+    st.success(f"File uploaded successfully: **{uploaded_file.name}**")
     
-    if st.button("🚀 Process All Pages & Extract Fields"):
+    if st.button("🚀 Process & Extract Fields"):
         extracted_rows = []
+        raw_pages_text = {}
         
-        # Open PDF and loop through every single page
         with pdfplumber.open(uploaded_file) as pdf:
             total_pages = len(pdf.pages)
-            
-            # Progress Bar UI element
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             for index, page in enumerate(pdf.pages):
-                status_text.text(f"Extracting data from page {index + 1} of {total_pages}...")
+                status_text.text(f"Processing page {index + 1} of {total_pages}...")
                 page_text = page.extract_text() or ""
                 
-                # Extract dictionary for this page
+                raw_pages_text[index + 1] = page_text # Save for debugging view
+                
                 page_data = extract_fields_from_text(page_text, index + 1)
                 extracted_rows.append(page_data)
                 
-                # Update progress bar
                 progress_bar.progress((index + 1) / total_pages)
             
-            status_text.text("Extraction completed successfully!")
+            status_text.text("Extraction completed!")
 
-        # Convert all rows into a complete Pandas DataFrame
         df = pd.DataFrame(extracted_rows)
 
         st.markdown("---")
-        st.subheader("📊 Extracted Data Matrix (All Pages)")
-        
-        # Display DataFrame interactively
+        st.subheader("📊 Extracted Data Preview")
         st.dataframe(df, use_container_width=True)
 
-        # Prepare Excel data in memory using openpyxl
+        # Excel Export
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Extracted Bill Data')
+            df.to_excel(writer, index=False, sheet_name='Extracted Data')
         excel_data = output.getvalue()
 
         st.markdown("---")
-        
-        # Download Button Container
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.markdown("Your spreadsheet is ready with all fields mapped across your document pages.")
-        with col2:
             st.download_button(
-                label="📥 Download Complete Excel File",
+                label="📥 Download Excel Spreadsheet (.xlsx)",
                 data=excel_data,
-                file_name=f"{uploaded_file.name.split('.')[0]}_all_pages_extracted.xlsx",
+                file_name=f"{uploaded_file.name.split('.')[0]}_extracted.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+        # --- Debug Expander to view raw text extracted by PDF ---
+        with st.expander("🔍 View Raw Text Extracted from PDF (For Troubleshooting)"):
+            for p_num, p_text in raw_pages_text.items():
+                st.markdown(f"**Page {p_num} Raw Text:**")
+                st.text(p_text)
