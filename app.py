@@ -6,7 +6,7 @@ from io import BytesIO
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="BEST & Utility Bill Extractor",
+    page_title="Multi-Utility Bill Extractor Pro",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -36,19 +36,22 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Sidebar ---
+# --- Sidebar Instructions ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/electricity.png", width=70)
-    st.title("Bill Extractor Pro")
+    st.title("Multi-Utility Parser")
     st.markdown("---")
-    st.markdown("### 📌 Features:")
+    st.markdown("### 📌 Supported Utilities:")
+    st.markdown("- **BEST** (Mumbai)")
+    st.markdown("- **Adani Electricity**")
+    st.markdown("- **Tata Power**")
+    st.markdown("- **MSEDCL / Mahavitaran**")
+    st.markdown("---")
     st.markdown("- **1 PDF Bill** = **1 Row** (all pages merged).")
-    st.markdown("- Specialized pattern matching for BEST & MSEDCL bills.")
-    st.markdown("- Strict data type separation (Numbers vs Text).")
 
 # --- Main App Header ---
-st.title("⚡ Precision Electricity Bill Extractor")
-st.markdown("Extract accurate numerical and text fields from utility bills into clean single rows.")
+st.title("⚡ Multi-Utility Electricity Bill Extractor")
+st.markdown("Upload bills from **BEST, Adani, Tata, MSEDCL**, or other providers to generate a clean master Excel sheet.")
 st.markdown("---")
 
 # --- Extraction Logic ---
@@ -80,14 +83,15 @@ def parse_single_bill(uploaded_file):
                     return val
         return default
 
-    # Precision regex mapping based on actual bill layouts (like BEST / MSEDCL)
+    # Universal robust mappings with multiple fallback patterns for different providers
     data = {
         "Source File": uploaded_file.name,
         
         # Numbers
         "CA No": find_num([
             r'C\.?A\.?\s*No\.?\s*[:\-]?\s*([0-9]{6,12})',
-            r'(?:Consumer\s*No\.?|CA\s*No\.?)\s*[:\-]?\s*([0-9]{6,12})'
+            r'(?:Consumer\s*No\.?|Account\s*No\.?|Cons\.?\s*No\.?)\s*[:\-]?\s*([0-9]{6,15})',
+            r'\b(?:CA)\b[^0-9]*([0-9]{6,12})'
         ], full_text),
         
         "Bill No": find_num([
@@ -95,19 +99,20 @@ def parse_single_bill(uploaded_file):
         ], full_text),
         
         "Meter no": find_num([
-            r'(?:Meter\s*No\.?|Meter\s*Number|Meter\s*ID)\s*[:\-]?\s*([0-9A-Za-z]{5,12})'
+            r'(?:Meter\s*No\.?|Meter\s*Number|Meter\s*ID)\s*[:\-]?\s*([0-9A-Za-z]{5,15})'
         ], full_text),
         
-        # Text (Address)
+        # Text
         "Address": find_text([
             r'Billing\s*Address\s*:\s*([^\n\r]+(?:[\r\n]+[^\n\r]+){0,2})',
-            r'(?:Service\s*Address|Billing\s*Address)\s*[:\-]?\s*([^\n\r]+)'
+            r'(?:Service\s*Address|Cons\.?\s*Name\s*&?\s*Address|Address)\s*[:\-]?\s*([^\n\r]+)'
         ], full_text),
         
         # Numbers
         "Sanction Load": find_num([
             r'Sanctioned\s*Load\s*[:\-]?\s*([0-9\.]+)',
-            r'(?:Sanction(?:ed)?\s*Load)\s*[:\-]?\s*([0-9\.]+)'
+            r'(?:Sanction(?:ed)?\s*Load)\s*[:\-]?\s*([0-9\.]+)',
+            r'([0-9\.]+)\s*(?:KW|KVA|kW|kVA)\s*Sanction'
         ], full_text),
         
         "Connected load": find_num([r'(?:Connected\s*Load)\s*[:\-]?\s*([0-9\.]+)'], full_text),
@@ -129,7 +134,7 @@ def parse_single_bill(uploaded_file):
         # Text
         "Tariff category": find_text([
             r'Category\s*[:\-]?\s*([A-Za-z\s]+)',
-            r'(?:Tariff\s*Category)\s*[:\-]?\s*([A-Za-z\s]+)'
+            r'(?:Tariff\s*Category|Consumer\s*Category)\s*[:\-]?\s*([A-Za-z\s]+)'
         ], full_text),
         
         "Tariff": find_text([
@@ -142,7 +147,7 @@ def parse_single_bill(uploaded_file):
             r'(?:Units?\s*Consumed|Billed\s*Units?|Consumption|Total\s*Units?)\s*[:\-]?\s*([0-9\.]+)'
         ], full_text),
         
-        # Text / Number
+        # Text/Numbers
         "Month": find_text([
             r'Electricity\s*Bill\s*for\s*Month\s*of\s*([A-Za-z]+)',
             r'(?:Month|Billing\s*Month)\s*[:\-]?\s*([A-Za-z]{3,9})'
@@ -181,13 +186,13 @@ def parse_single_bill(uploaded_file):
             r'(?:TOD\s*Charges?|Time\s*of\s*Day\s*Charges?)\s*[:\-]?\s*([-\d\.,]+)'
         ], full_text),
         
-        # Text (Supply Co.)
+        # Text (Supply Co. Auto-detection)
         "Supply Co.(BEST / Adani / Tata / MSEDCL)": (
             "BEST" if "BEST" in full_text else
             "Adani" if "ADANI" in full_text else
             "Tata" if "TATA" in full_text else
             "MSEDCL" if "MSEDCL" in full_text or "MAHAVITARAN" in full_text else
-            "Unknown"
+            "Other Utility"
         )
     }
 
@@ -222,7 +227,7 @@ if uploaded_files:
         st.subheader("📊 Structured Bill Summary (1 Row per Bill)")
         st.dataframe(df, use_container_width=True)
 
-        # Excel Export
+        # Excel Export Setup
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Bill Summary')
@@ -231,12 +236,12 @@ if uploaded_files:
         st.markdown("---")
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.markdown("Your structured master Excel sheet is ready.")
+            st.markdown("Your unified master Excel file is ready for download.")
         with col2:
             st.download_button(
                 label="📥 Download Master Excel File",
                 data=excel_data,
-                file_name="electricity_bills_structured.xlsx",
+                file_name="electricity_bills_master.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
