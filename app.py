@@ -171,7 +171,7 @@ def parse_bill_with_gemini(uploaded_file, api_key):
   for attempt in range(max_retries):
     try:
       response = client.models.generate_content(
-          model="gemini-2.5-flash",  # Updated to an active model
+          model="gemini-3.8-flash",  # Updated to the correct recommended model name
           contents=prompt,
           config=types.GenerateContentConfig(
               response_mime_type="application/json",
