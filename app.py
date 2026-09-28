@@ -168,9 +168,9 @@ def parse_bill_with_gemini(uploaded_file, api_key):
     {full_text}
     """
 
-  try:
+ try:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",  # Updated model name
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
