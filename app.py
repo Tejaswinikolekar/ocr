@@ -166,12 +166,12 @@ def parse_bill_with_gemini(uploaded_file, api_key):
     {full_text}
     """
 
-  # 3. Retry loop to handle demand spikes/503 errors gracefully
+  # 3. Retry loop to handle demand spikes/errors gracefully
   max_retries = 3
   for attempt in range(max_retries):
     try:
       response = client.models.generate_content(
-          model="gemini-1.5-flash",
+          model="gemini-2.5-flash",  # Updated to an active model
           contents=prompt,
           config=types.GenerateContentConfig(
               response_mime_type="application/json",
