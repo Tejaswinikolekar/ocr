@@ -1,14 +1,13 @@
 from io import BytesIO
 import json
 import os
+import time
+from google import genai
+from google.genai import types
 import pdfplumber
 import pandas as pd
 from pydantic import BaseModel, Field
 import streamlit as st
-
-# Import Google GenAI SDK
-from google import genai
-from google.genai import types
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -47,25 +46,25 @@ st.markdown(
 
 # --- Sidebar Configuration ---
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/electricity.png", width=70)
-    st.title("AI Bill Extractor")
-    st.markdown("---")
+  st.image("https://img.icons8.com/color/96/electricity.png", width=70)
+  st.title("AI Bill Extractor")
+  st.markdown("---")
 
-    # API Key Input for Gemini
-    api_key_input = st.text_input(
-        "Gemini API Key",
-        type="password",
-        help=(
-            "Enter your Google Gemini API key. Alternatively, set it as an"
-            " environment variable GEMINI_API_KEY."
-        ),
-    )
+  # API Key Input for Gemini
+  api_key_input = st.text_input(
+      "Gemini API Key",
+      type="password",
+      help=(
+          "Enter your Google Gemini API key. Alternatively, set it as an"
+          " environment variable GEMINI_API_KEY."
+      ),
+  )
 
-    st.markdown("---")
-    st.markdown("### 📌 Specifications:")
-    st.markdown("- **1 PDF Bill** = **1 Row** (all pages merged).")
-    st.markdown("- **AI-Powered Extraction** for layout robustness.")
-    st.markdown("- Strict schema mapping with automated Excel export.")
+  st.markdown("---")
+  st.markdown("### 📌 Specifications:")
+  st.markdown("- **1 PDF Bill** = **1 Row** (all pages merged).")
+  st.markdown("- **AI-Powered Extraction** with auto-retry resilience.")
+  st.markdown("- Strict schema mapping with automated Excel export.")
 
 # --- Main App Header ---
 st.title("⚡ AI-Powered Utility Bill Extractor")
@@ -140,7 +139,7 @@ class UtilityBillSchema(BaseModel):
   )
 
 
-# --- Extraction Function using Gemini SDK ---
+# --- Extraction Function using Gemini SDK with Retry Handling ---
 def parse_bill_with_gemini(uploaded_file, api_key):
   # 1. Extract text from PDF using pdfplumber
   full_text = ""
@@ -159,7 +158,6 @@ def parse_bill_with_gemini(uploaded_file, api_key):
 
   client = genai.Client(**client_kwargs)
 
-  # 3. Prompt Gemini to extract fields against the Pydantic schema
   prompt = f"""
     You are an expert data extraction assistant specialized in utility bills (MSEDCL, Adani, Tata, BEST, etc.).
     Extract all requested details accurately from the utility bill text provided below. If a value is missing or cannot be found, return "N/A".
@@ -168,23 +166,29 @@ def parse_bill_with_gemini(uploaded_file, api_key):
     {full_text}
     """
 
- try:
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",  # Updated model name
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=UtilityBillSchema,
-            temperature=0.0,  # Zero temperature for maximum factual consistency
-        ),
-    )
-    extracted_data = json.loads(response.text)
-    # Add source file name
-    extracted_data["Source File"] = uploaded_file.name
-    return extracted_data, full_text
-  except Exception as e:
-    st.error(f"Error processing {uploaded_file.name}: {e}")
-    return {"Source File": uploaded_file.name}, full_text
+  # 3. Retry loop to handle demand spikes/503 errors gracefully
+  max_retries = 3
+  for attempt in range(max_retries):
+    try:
+      response = client.models.generate_content(
+          model="gemini-1.5-flash",
+          contents=prompt,
+          config=types.GenerateContentConfig(
+              response_mime_type="application/json",
+              response_schema=UtilityBillSchema,
+              temperature=0.0,
+          ),
+      )
+      extracted_data = json.loads(response.text)
+      extracted_data["Source File"] = uploaded_file.name
+      return extracted_data, full_text
+    except Exception as e:
+      if attempt < max_retries - 1:
+        time.sleep(2)  # Wait 2 seconds before retrying
+        continue
+      else:
+        st.error(f"Error processing {uploaded_file.name}: {e}")
+        return {"Source File": uploaded_file.name}, full_text
 
 
 # --- Multiple File Uploader ---
