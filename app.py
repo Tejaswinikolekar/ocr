@@ -139,7 +139,7 @@ class UtilityBillSchema(BaseModel):
   )
 
 
-# --- Extraction Function using Gemini SDK with Retry Handling ---
+# --- Extraction Function using Gemini SDK with Exponential Back-off ---
 def parse_bill_with_gemini(uploaded_file, api_key):
   # 1. Extract text from PDF using pdfplumber
   full_text = ""
@@ -166,12 +166,12 @@ def parse_bill_with_gemini(uploaded_file, api_key):
     {full_text}
     """
 
-  # 3. Retry loop to handle demand spikes/errors gracefully
-  max_retries = 3
+  # 3. Robust retry loop with exponential back-off (handles 503 spikes)
+  max_retries = 4
   for attempt in range(max_retries):
     try:
       response = client.models.generate_content(
-          model="gemini-3.8-flash",  # Updated to the correct recommended model name
+          model="gemini-3.8-flash",
           contents=prompt,
           config=types.GenerateContentConfig(
               response_mime_type="application/json",
@@ -184,10 +184,15 @@ def parse_bill_with_gemini(uploaded_file, api_key):
       return extracted_data, full_text
     except Exception as e:
       if attempt < max_retries - 1:
-        time.sleep(2)  # Wait 2 seconds before retrying
+        sleep_time = 2 ** (
+            attempt + 1
+        )  # Wait longer each retry: 2s, 4s, 8s...
+        time.sleep(sleep_time)
         continue
       else:
-        st.error(f"Error processing {uploaded_file.name}: {e}")
+        st.error(
+            f"Error processing {uploaded_file.name} after multiple attempts: {e}"
+        )
         return {"Source File": uploaded_file.name}, full_text
 
 
