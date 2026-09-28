@@ -1,19 +1,26 @@
-import streamlit as st
-import pandas as pd
-import pdfplumber
-import re
 from io import BytesIO
+import json
+import os
+import pdfplumber
+import pandas as pd
+from pydantic import BaseModel, Field
+import streamlit as st
+
+# Import Google GenAI SDK
+from google import genai
+from google.genai import types
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Strict Schema Bill Extractor",
+    page_title="High-Accuracy AI Bill Extractor",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # --- Modern UI Styling ---
-st.markdown("""
+st.markdown(
+    """
     <style>
     .main {
         background-color: #0f172a;
@@ -34,155 +41,226 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
     }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# --- Sidebar Instructions ---
+# --- Sidebar Configuration ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/electricity.png", width=70)
-    st.title("Schema Extractor")
+    st.title("AI Bill Extractor")
+    st.markdown("---")
+
+    # API Key Input for Gemini
+    api_key_input = st.text_input(
+        "Gemini API Key",
+        type="password",
+        help=(
+            "Enter your Google Gemini API key. Alternatively, set it as an"
+            " environment variable GEMINI_API_KEY."
+        ),
+    )
+
     st.markdown("---")
     st.markdown("### 📌 Specifications:")
     st.markdown("- **1 PDF Bill** = **1 Row** (all pages merged).")
-    st.markdown("- Strict type separation (Numbers vs Text).")
-    st.markdown("- Multi-file batch support enabled.")
+    st.markdown("- **AI-Powered Extraction** for layout robustness.")
+    st.markdown("- Strict schema mapping with automated Excel export.")
 
 # --- Main App Header ---
-st.title("⚡ Utility Bill Schema Extractor")
-st.markdown("Extract bills into precise numerical and text columns with **one row per bill**.")
+st.title("⚡ AI-Powered Utility Bill Extractor")
+st.markdown(
+    "Extract bills into precise numerical and text columns with **one row per"
+    " bill** using Gemini."
+)
 st.markdown("---")
 
-# --- Extraction Logic ---
-def parse_single_bill(uploaded_file):
-    full_text = ""
+
+# --- Define Strict Output Schema using Pydantic ---
+class UtilityBillSchema(BaseModel):
+  CA_No: str = Field(
+      description=(
+          "Consumer Account Number, CA No, or Consumer No (e.g. 8-15 digits)"
+      )
+  )
+  Bill_No: str = Field(description="Bill Number, Invoice Number, or ID")
+  Meter_no: str = Field(description="Meter Number or Meter ID")
+  Address: str = Field(
+      description="Service Address or Consumer Name & Full Address"
+  )
+  Sanction_Load: str = Field(
+      description="Sanctioned Load with units if available e.g. 5 kW"
+  )
+  Connected_load: str = Field(
+      description="Connected Load with units if available"
+  )
+  Security_Deposit: str = Field(
+      description="Security Deposit amount or SD value"
+  )
+  RMD: str = Field(description="Registered Maximum Demand (RMD)")
+  BMD: str = Field(description="Billing Maximum Demand (BMD)")
+  Power_Factor: str = Field(description="Power Factor or P.F. value")
+  Contract_Demand: str = Field(description="Contract Demand or C.D.")
+  Billing_Demand: str = Field(description="Billing Demand value")
+  Tariff_category: str = Field(
+      description="Tariff Category classification e.g. LT-I, Commercial, etc."
+  )
+  Tariff: str = Field(description="Tariff code or details")
+  Units_Consumed: str = Field(
+      description="Total Units Consumed, Billed Units, or Consumption amount"
+  )
+  Month: str = Field(description="Billing Month e.g. January, March")
+  Year: str = Field(description="Billing Year e.g. 2026")
+  Current_month_bill_Amount_Rs: str = Field(
+      description=(
+          "Current Bill Amount, Net Amount, Total Bill Amount, or Amount"
+          " Payable"
+      )
+  )
+  Gov_Electricity_Duty: str = Field(
+      description="Government Electricity Duty or ED amount"
+  )
+  Digital_payment_discount: str = Field(
+      description="Digital Payment Discount, Online Discount, or DPC"
+  )
+  DELAYED_PAYMENT_CHARGES: str = Field(
+      description="Delayed Payment Charges or DPC amount"
+  )
+  Prompt_payment_discount: str = Field(
+      description="Prompt Payment Discount or PPD amount"
+  )
+  TOD_Charges: str = Field(
+      description="TOD Charges or Time of Day Charges amount"
+  )
+  Supply_Co: str = Field(
+      description=(
+          "Supply Company name: identify whether BEST, Adani, Tata, MSEDCL/Mahavitaran,"
+          " or Unknown"
+      )
+  )
+
+
+# --- Extraction Function using Gemini SDK ---
+def parse_bill_with_gemini(uploaded_file, api_key):
+  # 1. Extract text from PDF using pdfplumber
+  full_text = ""
+  with pdfplumber.open(uploaded_file) as pdf:
+    for page in pdf.pages:
+      text = page.extract_text()
+      if text:
+        full_text += text + "\n"
+
+  # 2. Configure Gemini Client
+  client_kwargs = {}
+  if api_key:
+    client_kwargs["api_key"] = api_key
+  elif os.environ.get("GEMINI_API_KEY"):
+    client_kwargs["api_key"] = os.environ.get("GEMINI_API_KEY")
+
+  client = genai.Client(**client_kwargs)
+
+  # 3. Prompt Gemini to extract fields against the Pydantic schema
+  prompt = f"""
+    You are an expert data extraction assistant specialized in utility bills (MSEDCL, Adani, Tata, BEST, etc.).
+    Extract all requested details accurately from the utility bill text provided below. If a value is missing or cannot be found, return "N/A".
     
-    # Merge text from all pages of the bill PDF
-    with pdfplumber.open(uploaded_file) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                full_text += text + "\n"
+    BILL TEXT CONTENT:
+    {full_text}
+    """
 
-    def find_num(regex_list, text, default="N/A"):
-        for regex in regex_list:
-            match = re.search(regex, text, re.IGNORECASE)
-            if match:
-                val = match.group(1).strip()
-                # Clean up commas in numbers if desired, keeping standard formatting
-                if val:
-                    return val
-        return default
+  try:
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=UtilityBillSchema,
+            temperature=0.0,  # Zero temperature for maximum factual consistency
+        ),
+    )
+    extracted_data = json.loads(response.text)
+    # Add source file name
+    extracted_data["Source File"] = uploaded_file.name
+    return extracted_data, full_text
+  except Exception as e:
+    st.error(f"Error processing {uploaded_file.name}: {e}")
+    return {"Source File": uploaded_file.name}, full_text
 
-    def find_text(regex_list, text, default="N/A"):
-        for regex in regex_list:
-            match = re.search(regex, text, re.IGNORECASE)
-            if match:
-                val = match.group(1).strip()
-                if val:
-                    return val
-        return default
-
-    # Mapping fields according to your exact schema and data types
-    data = {
-        "Source File": uploaded_file.name,
-        
-        # Numbers
-        "CA No": find_num([r'(?:CA\s*No\.?|Consumer\s*No\.?|Account\s*No\.?|Cons\.?\s*No\.?)\s*[:\-]?\s*([0-9]{8,15})', r'\b(?:CA)\b[^0-9]*([0-9]{9,12})'], full_text),
-        "Bill No": find_num([r'(?:Bill\s*No\.?|Invoice\s*No\.?|Bill\s*Number)\s*[:\-]?\s*([0-9]{6,15})'], full_text),
-        "Meter no": find_num([r'(?:Meter\s*No\.?|Meter\s*Number|Meter\s*ID)\s*[:\-]?\s*([0-9]{5,12})'], full_text),
-        
-        # Text
-        "Address": find_text([r'(?:Service\s*Address|Cons\.?\s*Name\s*&?\s*Address|Address)\s*[:\-]?\s*([^\n\r]+)'], full_text),
-        
-        # Numbers
-        "Sanction Load": find_num([r'(?:Sanction(?:ed)?\s*Load)\s*[:\-]?\s*([0-9\.]+)', r'([0-9\.]+)\s*(?:KW|KVA|kW|kVA)\s*Sanction'], full_text),
-        "Connected load": find_num([r'(?:Connected\s*Load)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        "Security Deposit": find_num([r'(?:Security\s*Deposit|SD)\s*[:\-]?\s*([\d\.,]+)'], full_text),
-        "RMD": find_num([r'(?:RMD|Registered\s*Maximum\s*Demand)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        "BMD": find_num([r'(?:BMD|Billing\s*Maximum\s*Demand)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        "Power Factor": find_num([r'(?:Power\s*Factor|P\.?F\.?)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        "Contract Demand": find_num([r'(?:Contract\s*Demand|C\.?D\.?)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        "Billing Demand": find_num([r'(?:Billing\s*Demand)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        
-        # Text
-        "Tariff category": find_text([r'(?:Tariff\s*Category|Category)\s*[:\-]?\s*([A-Za-z0-9\-\/\s]+)'], full_text),
-        "Tariff": find_text([r'(?<!Category\s)(?:Tariff)\s*[:\-]?\s*([A-Za-z0-9\-\/\s]+)'], full_text),
-        
-        # Numbers
-        "Units Consumed/Billed Unit": find_num([r'(?:Units?\s*Consumed|Billed\s*Units?|Consumption|Total\s*Units?)\s*[:\-]?\s*([0-9\.]+)'], full_text),
-        
-        # Text
-        "Month": find_text([r'(?:Month|Billing\s*Month)\s*[:\-]?\s*([A-Za-z]{3,9})'], full_text),
-        
-        # Numbers
-        "Year": find_num([r'(?:Year|Billing\s*Year)\s*[:\-]?\s*(\d{4})'], full_text),
-        "Current month bill Amount Rs": find_num([r'(?:Current\s*Bill\s*Amount|Net\s*Amount|Total\s*Bill\s*Amount|Amount\s*Payable)\s*[:\-]?\s*([\d\.,]+)'], full_text),
-        "Gov Electricity Duty": find_num([r'(?:Electricity\s*Duty|Govt\.?\s*Duty|Ed\s*Duty)\s*[:\-]?\s*([\d\.,]+)'], full_text),
-        "Digital payment discount / (DPC)": find_num([r'(?:Digital\s*Payment\s*Discount|Online\s*Discount|DPC|Delayed\s*Payment\s*Charges)\s*[:\-]?\s*([\d\.,]+)'], full_text),
-        "DELAYED PAYMENT CHARGES": find_num([r'(?:Delayed\s*Payment\s*Charges|DPC)\s*[:\-]?\s*([\d\.,]+)'], full_text),
-        "Prompt payment discount": find_num([r'(?:Prompt\s*Payment\s*Discount|PPD)\s*[:\-]?\s*([\d\.,]+)'], full_text),
-        "TOD Charges": find_num([r'(?:TOD\s*Charges?|Time\s*of\s*Day\s*Charges?)\s*[:\-]?\s*([\d\.,]+)'], full_text),
-        
-        # Text (Supply Co.)
-        "Supply Co.(BEST / Adani / Tata / MSEDCL)": (
-            "BEST" if "BEST" in full_text else
-            "Adani" if "ADANI" in full_text else
-            "Tata" if "TATA" in full_text else
-            "MSEDCL" if "MSEDCL" in full_text or "MAHAVITARAN" in full_text else
-            "Unknown"
-        )
-    }
-
-    return data, full_text
 
 # --- Multiple File Uploader ---
-uploaded_files = st.file_uploader("Upload your bill PDF(s)", type="pdf", accept_multiple_files=True)
+uploaded_files = st.file_uploader(
+    "Upload your bill PDF(s)", type="pdf", accept_multiple_files=True
+)
 
 if uploaded_files:
-    st.success(f"Successfully loaded **{len(uploaded_files)}** bill file(s).")
-    
-    if st.button("🚀 Process Bills to Single Rows"):
-        all_rows = []
-        raw_texts = {}
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for idx, uploaded_file in enumerate(uploaded_files):
-            status_text.text(f"Processing bill {idx + 1} of {len(uploaded_files)}: {uploaded_file.name}")
-            row_data, full_text = parse_single_bill(uploaded_file)
-            all_rows.append(row_data)
-            raw_texts[uploaded_file.name] = full_text
-            progress_bar.progress((idx + 1) / len(uploaded_files))
-            
-        status_text.text("Processing completed successfully!")
+  st.success(f"Successfully loaded **{len(uploaded_files)}** bill file(s).")
 
-        # Master DataFrame (1 Row per Bill PDF)
-        df = pd.DataFrame(all_rows)
+  # Check API Key validity before processing
+  active_key = api_key_input.strip() or os.environ.get("GEMINI_API_KEY")
 
-        st.markdown("---")
-        st.subheader("📊 Structured Bill Summary (1 Row per Bill)")
-        st.dataframe(df, use_container_width=True)
+  if st.button("🚀 Process Bills with AI"):
+    if not active_key:
+      st.error(
+          "⚠️ Please provide your Gemini API Key in the sidebar or set your"
+          " GEMINI_API_KEY environment variable."
+      )
+    else:
+      all_rows = []
+      raw_texts = {}
 
-        # Excel Export
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Bill Summary')
-        excel_data = output.getvalue()
+      progress_bar = st.progress(0)
+      status_text = st.empty()
 
-        st.markdown("---")
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.markdown("Your structured master Excel sheet is ready.")
-        with col2:
-            st.download_button(
-                label="📥 Download Master Excel File",
-                data=excel_data,
-                file_name="electricity_bills_structured.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+      for idx, uploaded_file in enumerate(uploaded_files):
+        status_text.text(
+            f"Analyzing bill {idx + 1} of {len(uploaded_files)} with AI:"
+            f" {uploaded_file.name}"
+        )
+        row_data, full_text = parse_bill_with_gemini(uploaded_file, active_key)
+        all_rows.append(row_data)
+        raw_texts[uploaded_file.name] = full_text
+        progress_bar.progress((idx + 1) / len(uploaded_files))
 
-        # Raw Text Inspection Expander
-        with st.expander("🔍 View Raw Text of Processed Bills (For Layout Verification)"):
-            for fname, text in raw_texts.items():
-                st.markdown(f"**File: {fname}**")
-                st.text(text[:2000] + "\n... [truncated]")
+      status_text.text("Extraction completed successfully!")
+
+      # Master DataFrame (1 Row per Bill PDF)
+      df = pd.DataFrame(all_rows)
+
+      # Reorder columns to put 'Source File' first if present
+      if "Source File" in df.columns:
+        cols = ["Source File"] + [c for c in df.columns if c != "Source File"]
+        df = df[cols]
+
+      st.markdown("---")
+      st.subheader("📊 Structured Bill Summary (1 Row per Bill)")
+      st.dataframe(df, use_container_width=True)
+
+      # Excel Export
+      output = BytesIO()
+      with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Bill Summary")
+      excel_data = output.getvalue()
+
+      st.markdown("---")
+      col1, col2 = st.columns([2, 1])
+      with col1:
+        st.markdown(
+            "Your structured master Excel sheet is ready for download."
+        )
+      with col2:
+        st.download_button(
+            label="📥 Download Master Excel File",
+            data=excel_data,
+            file_name="electricity_bills_ai_structured.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+
+      # Raw Text Inspection Expander
+      with st.expander(
+          "🔍 View Raw Text of Processed Bills (For Layout Verification)"
+      ):
+        for fname, text in raw_texts.items():
+          st.markdown(f"**File: {fname}**")
+          st.text(text[:2000] + "\n... [truncated]")
